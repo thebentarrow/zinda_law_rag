@@ -1,0 +1,62 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: zinda-law-backend
+  annotations:
+    run.googleapis.com/ingress: all
+spec:
+  template:
+    metadata:
+      annotations:
+        # Scale to zero when idle to minimise cost
+        autoscaling.knative.dev/minScale: "0"
+        autoscaling.knative.dev/maxScale: "3"
+        # Mount a Cloud Storage bucket as the /data volume for SQLite + ChromaDB persistence
+        run.googleapis.com/cloudsql-instances: ""   # leave empty; using GCS FUSE instead
+    spec:
+      containerConcurrency: 80
+      timeoutSeconds: 300
+      serviceAccountName: zinda-law-sa@YOUR_PROJECT_ID.iam.gserviceaccount.com
+      containers:
+        - image: REGION-docker.pkg.dev/YOUR_PROJECT_ID/zinda-law/backend:latest
+          ports:
+            - containerPort: 8000
+          resources:
+            limits:
+              cpu: "1"
+              memory: 2Gi
+          env:
+            - name: ENVIRONMENT
+              value: production
+            - name: SQLITE_PATH
+              value: /data/app.db
+            - name: CHROMA_PATH
+              value: /data/chroma
+            - name: LOG_LEVEL
+              value: INFO
+            # Sensitive values are resolved from Secret Manager at deploy time
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: openai-api-key
+                  key: latest
+            - name: CHAT_MODEL
+              valueFrom:
+                secretKeyRef:
+                  name: chat-model
+                  key: latest
+            - name: EMBEDDING_MODEL
+              valueFrom:
+                secretKeyRef:
+                  name: embedding-model
+                  key: latest
+          volumeMounts:
+            - name: data-volume
+              mountPath: /data
+      volumes:
+        - name: data-volume
+          csi:
+            driver: gcsfuse.run.googleapis.com
+            readOnly: false
+            volumeAttributes:
+              bucketName: YOUR_PROJECT_ID-zinda-law-data
